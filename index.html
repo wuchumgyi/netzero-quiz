@@ -416,7 +416,7 @@
                 return key.trim();
             };
 
-            // --- 強化 AI 換線備援機制 (Auto Fallback) ---
+            // --- 修復 API 解析與準確追蹤錯誤 ---
             const fetchQuestionData = async (q) => {
                 const apiKey = getApiKey();
                 
@@ -441,26 +441,23 @@
                     }
                 };
 
-                // 自動切換模型清單：當一個 API 失敗或不支援時，系統會自動嘗試下一個
+                // 只使用穩定版與最新版的端點，不隱藏錯誤
                 const endpointsToTry = [
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
                     `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`
                 ];
 
-                let lastErrorMsg = "";
+                let errorLog = [];
                 for (const url of endpointsToTry) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         if (!response.ok) {
                             const errText = await response.text();
+                            let errMsg = `HTTP ${response.status}`;
                             try {
-                                lastErrorMsg = JSON.parse(errText).error?.message || `HTTP ${response.status}`;
-                            } catch(e) {
-                                lastErrorMsg = `HTTP ${response.status}`;
-                            }
-                            continue; // 失敗，自動換下一個模型測試
+                                errMsg = JSON.parse(errText).error?.message || errMsg;
+                            } catch(e) {}
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -468,13 +465,14 @@
                         if (resultJson.answer && ["A", "B", "C", "D"].includes(resultJson.answer) && resultJson.reasoning) {
                             return resultJson;
                         }
+                        throw new Error("回傳格式異常");
                     } catch (e) {
-                        lastErrorMsg = e.message;
-                        continue; // 例外，換下一個
+                        errorLog.push(e.message);
+                        continue;
                     }
                 }
                 
-                return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析，已自動切換多種模型皆失敗。最後錯誤: ${lastErrorMsg}` };
+                return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析，錯誤紀錄：${errorLog.join(' | ')}` };
             };
 
             const getOrFetchQuestionData = async (q) => {
@@ -592,13 +590,11 @@
                 };
 
                 const endpointsToTry = [
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
                     `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`
                 ];
 
-                let lastErrorMsg = "";
+                let errorLog = [];
                 let newExplanation = "AI 暫時無法處理您的糾正，請稍後再試。";
                 let newAnswer = qTarget.answer;
                 let success = false;
@@ -608,9 +604,9 @@
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         if (!response.ok) {
                             const errText = await response.text();
-                            try { lastErrorMsg = JSON.parse(errText).error?.message || `HTTP ${response.status}`; } 
-                            catch(e) { lastErrorMsg = `HTTP ${response.status}`; }
-                            continue;
+                            let errMsg = `HTTP ${response.status}`;
+                            try { errMsg = JSON.parse(errText).error?.message || errMsg; } catch(e) {}
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -621,14 +617,14 @@
                             success = true;
                             break;
                         }
+                        throw new Error("回傳格式異常");
                     } catch (error) {
-                        lastErrorMsg = error.message;
-                        continue;
+                        errorLog.push(error.message);
                     }
                 }
                 
                 if(!success) {
-                    newExplanation = `AI 暫時無法處理您的糾正，已嘗試多種模型皆失敗。最後錯誤: ${lastErrorMsg}`;
+                    newExplanation = `AI 暫時無法處理您的糾正，錯誤紀錄：${errorLog.join(' | ')}`;
                 }
 
                 const updatedQ = { ...qTarget, answer: newAnswer, explanation: newExplanation };
@@ -692,23 +688,21 @@
                 };
 
                 const endpointsToTry = [
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
                     `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`
                 ];
 
                 let success = false;
-                let lastErrorMsg = "";
+                let errorLog = [];
 
                 for (const url of endpointsToTry) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         if (!response.ok) {
                             const errText = await response.text();
-                            try { lastErrorMsg = JSON.parse(errText).error?.message || `HTTP ${response.status}`; } 
-                            catch(e) { lastErrorMsg = `HTTP ${response.status}`; }
-                            continue;
+                            let errMsg = `HTTP ${response.status}`;
+                            try { errMsg = JSON.parse(errText).error?.message || errMsg; } catch(e) {}
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -738,18 +732,16 @@
                                 success = true;
                                 break; 
                             } catch (parseError) {
-                                lastErrorMsg = 'AI 回傳格式異常';
-                                continue;
+                                throw new Error('AI 回傳格式異常');
                             }
                         }
                     } catch (error) {
-                        lastErrorMsg = error.message;
-                        continue;
+                        errorLog.push(error.message);
                     }
                 }
                 
                 if(!success) {
-                    setImportMessage({ text: `AI 服務連線失敗 (最後錯誤: ${lastErrorMsg})，請稍後再試。`, type: 'error' });
+                    setImportMessage({ text: `AI 服務連線失敗。錯誤紀錄：${errorLog.join(' | ')}`, type: 'error' });
                 }
                 setIsAiImporting(false);
             };
