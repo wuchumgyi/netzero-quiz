@@ -9,7 +9,7 @@
     <!-- 載入 React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- 載入 Babel (讓瀏覽器能看懂 JSX) -->
+    <!-- 載入 Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- 載入 Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -18,23 +18,11 @@
     <div id="root"></div>
 
     <script>
-        // 設定 Gemini API Key
-        window.__gemini_api_key = "AIzaSyDIy2qw4CiEBJw2trwsKoELjlkvr8SLhQU"; // 若將此檔案下載至本地執行，請將空字串換成您的 Gemini API Key
-    </script>
-
-    <!-- 載入 Firebase SDK (使用 ES Modules) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-
-        // 自動偵測是否在 Canvas 環境中，以決定要使用哪組設定
-        let config;
-        try {
-            config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        } catch(e) { config = null; }
-
-        const firebaseConfig = config || {
+        // 1. 設定 Gemini API Key (負責 AI 解題)
+        window.__gemini_api_key = "AIzaSyDIy2qw4CiEBJw2trwsKoELjlkvr8SLhQU"; 
+        
+        // 2. 設定 Firebase 雲端資料庫 (負責跨裝置同步)
+        window.__firebase_config = {
             apiKey: "AIzaSyBv8mwGgyvtz8ok_Fi2Zzh3uaL-4BeLKrI",
             authDomain: "net-zero-de16c.firebaseapp.com",
             projectId: "net-zero-de16c",
@@ -42,21 +30,36 @@
             messagingSenderId: "525773014824",
             appId: "1:525773014824:web:c1e4435fcbdf20ad8db21d"
         };
+    </script>
 
-        // 將 Firebase 實例與功能掛載到 window，讓 React 能夠存取
-        const app = initializeApp(firebaseConfig);
-        window.__firebase_auth = getAuth(app);
-        window.__firebase_db = getFirestore(app);
-        window.__firebase_auth_funcs = { signInAnonymously, signInWithCustomToken, onAuthStateChanged };
-        window.__firebase_db_funcs = { collection, onSnapshot, doc, setDoc };
-        window.__firebase_app_id = config ? (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id') : "1:525773014824:web:c1e4435fcbdf20ad8db21d";
+    <!-- 載入 Firebase SDK (加入 writeBatch 支援與安全防護) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        try {
+            let config;
+            try { config = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : null; } catch(e) { config = null; }
+            const firebaseConfig = config || window.__firebase_config;
+
+            if (firebaseConfig && firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("您的_")) {
+                const app = initializeApp(firebaseConfig);
+                window.__firebase_auth = getAuth(app);
+                window.__firebase_db = getFirestore(app);
+                window.__firebase_auth_funcs = { signInAnonymously, signInWithCustomToken, onAuthStateChanged };
+                window.__firebase_db_funcs = { collection, onSnapshot, doc, setDoc, writeBatch };
+                window.__firebase_app_id = config ? (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id') : (firebaseConfig.projectId || 'my-quiz-app');
+            }
+        } catch (e) {
+            console.warn("Firebase 初始化被略過或發生錯誤:", e);
+        }
     </script>
 
     <!-- React 應用程式代碼 -->
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
 
-        // 手動建立 SVG Icons 元件 (因為無法直接 import lucide-react)
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
             useEffect(() => {
@@ -68,141 +71,35 @@
         };
 
         const initialQuestions = [
-            // 考科一
-            {
-                id: '1-1',
-                subject: '考科一：淨零碳規劃管理基礎概論',
-                question: '什麼是碳盤查查證？',
-                options: {
-                A: '由第三方機構確認企業的碳盤查結果是否符合相關標準',
-                B: '由政府機構確認企業的碳盤查結果是否符合法規要求',
-                C: '由企業內部人員確認碳盤查結果是否正確',
-                D: '由顧問公司協助企業進行碳盤查'
-                },
-                answer: 'A'
-            },
-            {
-                id: '1-2',
-                subject: '考科一：淨零碳規劃管理基礎概論',
-                question: '什麼是綠色科技(Green technology)？',
-                options: {
-                A: '對環境友善的科技',
-                B: '對社會有益的科技',
-                C: '對經濟有貢獻的科技',
-                D: '以上皆是'
-                },
-                answer: 'A'
-            },
-            {
-                id: '1-3',
-                subject: '考科一：淨零碳規劃管理基礎概論',
-                question: '什麼是氣候變遷調適 (Climate change adaptation)？',
-                options: {
-                A: '減緩氣候變遷的行動',
-                B: '適應氣候變遷的行動',
-                C: '預測氣候變遷的行動',
-                D: '扭轉氣候變遷的行動'
-                },
-                answer: 'B'
-            },
-            {
-                id: '1-4',
-                subject: '考科一：淨零碳規劃管理基礎概論',
-                question: '什麼是碳足跡盤查？',
-                options: {
-                A: '計算企業溫室氣體排放量的過程',
-                B: '計算產品生命週期碳排放量的過程',
-                C: '計算個人碳排放量的過程',
-                D: '以上皆非'
-                },
-                answer: 'B'
-            },
-            {
-                id: '1-5',
-                subject: '考科一：淨零碳規劃管理基礎概論',
-                question: '什麼是碳揭露專案(Carbon Disclosure Project, CDP)？',
-                options: {
-                A: '政府要求企業揭露碳排放量的計畫',
-                B: '企業自願揭露碳排放量的計畫',
-                C: '非營利組織推動企業揭露環境資訊的平台',
-                D: '以上皆非'
-                },
-                answer: 'C'
-            },
-            // 考科二
-            {
-                id: '2-1',
-                subject: '考科二：淨零碳盤查規範與程序概要',
-                question: '產品碳足跡 (CFP) 的主要標準依據為何？',
-                options: {
-                A: 'ISO 14064-1',
-                B: 'ISO 14067',
-                C: 'ISO 50001',
-                D: 'GHG Protocol'
-                },
-                answer: 'B'
-            },
-            {
-                id: '2-2',
-                subject: '考科二：淨零碳盤查規範與程序概要',
-                question: 'LCA 的四大階段中，哪一階段需設定「功能單位」？',
-                options: {
-                A: '目標與範疇界定',
-                B: '清單盤查',
-                C: '衝擊評估',
-                D: '結果闡釋'
-                },
-                answer: 'A'
-            },
-            {
-                id: '2-3',
-                subject: '考科二：淨零碳盤查規範與程序概要',
-                question: '在碳足跡盤查時，最重要的基礎單位是？',
-                options: {
-                A: '公頃',
-                B: '功能單位',
-                C: '每人碳排量',
-                D: '每噸碳權'
-                },
-                answer: 'B'
-            },
-            {
-                id: '2-4',
-                subject: '考科二：淨零碳盤查規範與程序概要',
-                question: '全球暖化潛勢 (GWP) 的數據主要由哪個機構發布？',
-                options: {
-                A: 'UNFCCC',
-                B: 'IPCC',
-                C: 'WTO',
-                D: 'ISO'
-                },
-                answer: 'B'
-            },
-            {
-                id: '2-5',
-                subject: '考科二：淨零碳盤查規範與程序概要',
-                question: '碳足跡計算結果公布前，通常需經過？',
-                options: {
-                A: '第三方查驗確認',
-                B: '內部主管簽核即可',
-                C: '直接送交政府平台',
-                D: '自願性公示即可'
-                },
-                answer: 'A'
-            }
+            { id: '1-1', subject: '考科一：淨零碳規劃管理基礎概論', question: '什麼是碳盤查查證？', options: { A: '由第三方機構確認企業的碳盤查結果是否符合相關標準', B: '由政府機構確認企業的碳盤查結果是否符合法規要求', C: '由企業內部人員確認碳盤查結果是否正確', D: '由顧問公司協助企業進行碳盤查' }, answer: 'A' },
+            { id: '1-2', subject: '考科一：淨零碳規劃管理基礎概論', question: '什麼是綠色科技(Green technology)？', options: { A: '對環境友善的科技', B: '對社會有益的科技', C: '對經濟有貢獻的科技', D: '以上皆是' }, answer: 'A' },
+            { id: '2-1', subject: '考科二：淨零碳盤查規範與程序概要', question: '產品碳足跡 (CFP) 的主要標準依據為何？', options: { A: 'ISO 14064-1', B: 'ISO 14067', C: 'ISO 50001', D: 'GHG Protocol' }, answer: 'B' },
+            { id: '2-2', subject: '考科二：淨零碳盤查規範與程序概要', question: 'LCA 的四大階段中，哪一階段需設定「功能單位」？', options: { A: '目標與範疇界定', B: '清單盤查', C: '衝擊評估', D: '結果闡釋' }, answer: 'A' }
         ];
 
+        const getLocalData = () => {
+            try {
+                const saved = localStorage.getItem('netzero_quiz_local_data');
+                return saved ? JSON.parse(saved) : initialQuestions;
+            } catch(e) {
+                return initialQuestions;
+            }
+        };
+        const saveLocalData = (data) => {
+            localStorage.setItem('netzero_quiz_local_data', JSON.stringify(data));
+        };
+
         function App() {
-            // 雲端與本地狀態
             const [user, setUser] = useState(null);
-            const [localQuestions, setLocalQuestions] = useState(initialQuestions);
+            const [connectionStatus, setConnectionStatus] = useState('connecting');
+            
+            const [localQuestions, setLocalQuestions] = useState(getLocalData());
             const [cloudQuestions, setCloudQuestions] = useState([]);
             const [isCloudLoading, setIsCloudLoading] = useState(true);
 
             const [view, setView] = useState('home'); 
             const [currentSubject, setCurrentSubject] = useState('');
             
-            // Quiz State
             const [activeQuestions, setActiveQuestions] = useState([]);
             const [currentIndex, setCurrentIndex] = useState(0);
             const [selectedOption, setSelectedOption] = useState(null);
@@ -210,52 +107,115 @@
             const [showAnswer, setShowAnswer] = useState(false);
             const [isDeterminingAnswer, setIsDeterminingAnswer] = useState(false); 
 
-            // 背景預載使用的 Ref
             const fetchingPromises = useRef({});
 
-            // 測驗設定與紀錄
             const [questionCount, setQuestionCount] = useState(10);
             const [quizHistory, setQuizHistory] = useState([]);
-
-            // 糾正 AI 功能的 State
             const [isCorrectingBoxOpen, setIsCorrectingBoxOpen] = useState({});
             const [correctionInput, setCorrectionInput] = useState({});
             const [isCorrectingSubmit, setIsCorrectingSubmit] = useState({});
 
-            // Import State
             const [importText, setImportText] = useState('');
+            const [debouncedImportText, setDebouncedImportText] = useState('');
             const [importSubject, setImportSubject] = useState('考科一：淨零碳規劃管理基礎概論');
             const [importMessage, setImportMessage] = useState({ text: '', type: '' });
             const [isAiImporting, setIsAiImporting] = useState(false);
             const [isImportingToCloud, setIsImportingToCloud] = useState(false);
-            
             const [parsedPreview, setParsedPreview] = useState([]);
+            const [duplicateCount, setDuplicateCount] = useState(0); // 防重複計數器
             const [showCleanText, setShowCleanText] = useState(false);
 
-            // --- Firebase 雲端驗證與監聽 ---
+            const fileInputRef = useRef(null);
+
+            // --- 實體檔案匯出/匯入 ---
+            const handleExportFile = () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allQuestions));
+                const dlAnchorElem = document.createElement('a');
+                dlAnchorElem.setAttribute("href", dataStr);
+                dlAnchorElem.setAttribute("download", "netzero_quiz_backup.json");
+                dlAnchorElem.click();
+            };
+
+            const handleImportFile = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const importedData = JSON.parse(evt.target.result);
+                        if (Array.isArray(importedData)) {
+                            // 匯入備份檔時也執行防重複比對
+                            const existingQuestions = new Set(allQuestions.map(q => q.question.trim()));
+                            const uniqueImported = [];
+                            let dupeCount = 0;
+                            
+                            importedData.forEach(q => {
+                                const qText = q.question.trim();
+                                if (existingQuestions.has(qText)) {
+                                    dupeCount++;
+                                } else {
+                                    uniqueImported.push(q);
+                                    existingQuestions.add(qText);
+                                }
+                            });
+
+                            if (uniqueImported.length > 0) {
+                                const nextLocal = [...localQuestions, ...uniqueImported];
+                                setLocalQuestions(nextLocal);
+                                saveLocalData(nextLocal);
+                                alert(`成功從備份檔匯入 ${uniqueImported.length} 題新題目！(過濾了 ${dupeCount} 題重複)`);
+                            } else {
+                                alert(`備份檔內的題目都已經存在題庫中了，無新增項目！`);
+                            }
+                        }
+                    } catch(err) {
+                        alert("檔案格式錯誤，請確定是本系統匯出的 JSON 備份檔。");
+                    }
+                    e.target.value = ''; 
+                };
+                reader.readAsText(file);
+            };
+
+            // --- Firebase 連線驗證 ---
             useEffect(() => {
+                if (!window.__firebase_auth_funcs || !window.__firebase_auth) {
+                    setConnectionStatus('offline');
+                    setIsCloudLoading(false);
+                    return;
+                }
+
                 const initAuth = async () => {
                     const { signInAnonymously, signInWithCustomToken } = window.__firebase_auth_funcs;
                     try {
-                        // 如果環境有提供 Custom Token 則優先使用，否則使用匿名登入
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(window.__firebase_auth, __initial_auth_token);
                         } else {
                             await signInAnonymously(window.__firebase_auth);
                         }
+                        setConnectionStatus('online');
                     } catch (error) {
-                        console.error("Firebase 登入失敗:", error);
+                        setConnectionStatus('offline');
+                        setIsCloudLoading(false);
                     }
                 };
                 initAuth();
                 
                 const { onAuthStateChanged } = window.__firebase_auth_funcs;
-                const unsubscribe = onAuthStateChanged(window.__firebase_auth, setUser);
+                const unsubscribe = onAuthStateChanged(window.__firebase_auth, (u) => {
+                    setUser(u);
+                    if(!u) {
+                        setConnectionStatus('offline');
+                        setIsCloudLoading(false);
+                    }
+                });
                 return () => unsubscribe();
             }, []);
 
             useEffect(() => {
-                if (!user) return;
+                if (!user || connectionStatus === 'offline' || !window.__firebase_db_funcs) {
+                    setIsCloudLoading(false);
+                    return;
+                }
                 const { collection, onSnapshot } = window.__firebase_db_funcs;
                 const appId = window.__firebase_app_id;
                 const qRef = collection(window.__firebase_db, 'artifacts', appId, 'public', 'data', 'questions');
@@ -265,41 +225,61 @@
                     setCloudQuestions(fetched);
                     setIsCloudLoading(false);
                 }, (error) => {
-                    console.error("雲端連線錯誤:", error);
+                    setConnectionStatus('offline');
                     setIsCloudLoading(false);
                 });
                 return () => unsubscribe();
-            }, [user]);
+            }, [user, connectionStatus]);
 
-            // 合併本地預載與雲端題庫 (排除重複 ID)
             const allQuestions = useMemo(() => {
                 const cloudIds = new Set(cloudQuestions.map(q => q.id));
                 const filteredLocal = localQuestions.filter(q => !cloudIds.has(q.id));
                 return [...filteredLocal, ...cloudQuestions];
             }, [localQuestions, cloudQuestions]);
 
-            // 儲存更新 (同步至雲端或本地)
             const saveQuestionUpdate = async (updatedQ) => {
                 const isCloud = cloudQuestions.some(q => q.id === updatedQ.id);
-                if (isCloud && user) {
-                    const { doc, setDoc } = window.__firebase_db_funcs;
-                    const appId = window.__firebase_app_id;
-                    const docRef = doc(window.__firebase_db, 'artifacts', appId, 'public', 'data', 'questions', updatedQ.id);
-                    await setDoc(docRef, updatedQ, { merge: true });
+                if (isCloud && user && connectionStatus === 'online' && window.__firebase_db_funcs) {
+                    try {
+                        const { doc, setDoc } = window.__firebase_db_funcs;
+                        const appId = window.__firebase_app_id;
+                        const docRef = doc(window.__firebase_db, 'artifacts', appId, 'public', 'data', 'questions', updatedQ.id);
+                        await setDoc(docRef, updatedQ, { merge: true });
+                    } catch (e) {
+                        updateLocalFallback(updatedQ);
+                    }
                 } else {
-                    setLocalQuestions(prev => prev.map(q => q.id === updatedQ.id ? updatedQ : q));
+                    updateLocalFallback(updatedQ);
                 }
             };
 
-            // --- 匯入文字解析 ---
+            const updateLocalFallback = (updatedQ) => {
+                setLocalQuestions(prev => {
+                    const next = prev.map(q => q.id === updatedQ.id ? updatedQ : q);
+                    if (!next.find(q => q.id === updatedQ.id)) next.push(updatedQ);
+                    saveLocalData(next);
+                    return next;
+                });
+            };
+
+            // 防凍結：停止打字 0.5 秒後才解析
             useEffect(() => {
-                if (!importText.trim()) {
+                const timerId = setTimeout(() => {
+                    setDebouncedImportText(importText);
+                }, 500); 
+                return () => clearTimeout(timerId);
+            }, [importText]);
+
+            // 自動防重複解析機制
+            useEffect(() => {
+                if (!debouncedImportText.trim()) {
                     setParsedPreview([]);
+                    setDuplicateCount(0);
                     return;
                 }
 
-                const lines = importText.split('\n');
-                const parsed = [];
+                const lines = debouncedImportText.split('\n');
+                const tempParsed = [];
                 let current = null;
 
                 const bulletPattern = '^[\\s○oO•・·\\-\\*]*';
@@ -325,7 +305,7 @@
                         const key = optMatch[1].toUpperCase();
                         
                         if (current.options[key]) {
-                            parsed.push({...current, subject: importSubject, id: `cloud_${Date.now()}_${Math.random().toString(36).substring(2)}`});
+                            tempParsed.push({...current, subject: importSubject, id: `local_${Date.now()}_${Math.random().toString(36).substring(2)}`});
                             current = { question: '【請確認題目文字是否遺失】\n' + line, options: {}, answer: '' };
                         } else {
                             current.options[key] = optMatch[2].trim();
@@ -334,7 +314,7 @@
                     }
 
                     if (current && Object.keys(current.options).length > 0) {
-                        parsed.push({...current, subject: importSubject, id: `cloud_${Date.now()}_${Math.random().toString(36).substring(2)}`});
+                        tempParsed.push({...current, subject: importSubject, id: `local_${Date.now()}_${Math.random().toString(36).substring(2)}`});
                         current = { question: line, options: {}, answer: '' };
                     } else {
                         if (!current) {
@@ -346,32 +326,67 @@
                 }
                 
                 if (current && (current.question || Object.keys(current.options).length > 0)) {
-                    parsed.push({...current, subject: importSubject, id: `cloud_${Date.now()}_${Math.random().toString(36).substring(2)}`});
+                    tempParsed.push({...current, subject: importSubject, id: `local_${Date.now()}_${Math.random().toString(36).substring(2)}`});
                 }
 
-                setParsedPreview(parsed);
-            }, [importText, importSubject]);
+                // 進行防重複比對 (Deduplication)
+                const existingQuestions = new Set(allQuestions.map(q => q.question.trim()));
+                const uniqueParsed = [];
+                let dupeCount = 0;
 
-            // 確認匯入並上傳雲端
+                tempParsed.forEach(q => {
+                    const qClean = q.question.trim();
+                    if (existingQuestions.has(qClean)) {
+                        dupeCount++;
+                    } else {
+                        uniqueParsed.push(q);
+                        existingQuestions.add(qClean); // 防止本次貼上的文字中自己重複
+                    }
+                });
+
+                setParsedPreview(uniqueParsed);
+                setDuplicateCount(dupeCount);
+            }, [debouncedImportText, importSubject, allQuestions]);
+
+            // Batch 批次寫入
             const confirmImport = async () => {
-                if (parsedPreview.length === 0 || !user) return;
+                if (parsedPreview.length === 0) return;
                 setIsImportingToCloud(true);
-                setImportMessage({ text: `正在同步至雲端，請稍候...`, type: 'info' });
+                
+                if (user && connectionStatus === 'online' && window.__firebase_db_funcs) {
+                    setImportMessage({ text: `正在批次同步 ${parsedPreview.length} 題至雲端，請稍候...`, type: 'info' });
+                    try {
+                        const { doc, writeBatch } = window.__firebase_db_funcs;
+                        const appId = window.__firebase_app_id;
+                        
+                        const batch = writeBatch(window.__firebase_db);
+                        parsedPreview.forEach(q => {
+                            const docRef = doc(window.__firebase_db, 'artifacts', appId, 'public', 'data', 'questions', q.id);
+                            batch.set(docRef, q);
+                        });
+                        await batch.commit();
 
-                try {
-                    const { doc, setDoc } = window.__firebase_db_funcs;
-                    const appId = window.__firebase_app_id;
-                    await Promise.all(parsedPreview.map(q => {
-                        const docRef = doc(window.__firebase_db, 'artifacts', appId, 'public', 'data', 'questions', q.id);
-                        return setDoc(docRef, q);
-                    }));
-                    setImportMessage({ text: `成功將 ${parsedPreview.length} 題同步至雲端題庫！您現在可以用手機開啟本頁面刷題了。`, type: 'success' });
-                    setImportText('');
-                    setParsedPreview([]);
-                } catch (error) {
-                    setImportMessage({ text: '同步至雲端失敗，請稍後再試。', type: 'error' });
+                        fallbackSaveLocal(`成功將 ${parsedPreview.length} 題同步至雲端題庫！`);
+                    } catch (error) {
+                        console.error("雲端寫入失敗:", error);
+                        fallbackSaveLocal("雲端寫入被拒絕或發生異常，已自動改存於本機。");
+                    }
+                } else {
+                    fallbackSaveLocal(`系統為離線模式，已成功將 ${parsedPreview.length} 題儲存於本機！`);
                 }
+                
                 setIsImportingToCloud(false);
+                setImportText('');
+                setDebouncedImportText('');
+                setParsedPreview([]);
+                setDuplicateCount(0);
+            };
+
+            const fallbackSaveLocal = (msg) => {
+                const next = [...localQuestions, ...parsedPreview];
+                setLocalQuestions(next);
+                saveLocalData(next);
+                setImportMessage({ text: msg, type: 'success' });
             };
 
             const getCleanText = () => {
@@ -386,15 +401,17 @@
                 }).join('\n');
             };
 
-            // 背景非同步取得答案與解析 (包含嚴謹防呆與思維鏈)
             const fetchQuestionData = async (q) => {
                 const apiKey = window.__gemini_api_key;
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                if(!apiKey || apiKey.includes("您的_")) {
+                    return { answer: q.answer || 'A', reasoning: '⚠️ 因未設定有效的 Gemini API 金鑰，系統無法提供 AI 推論與解析功能。' };
+                }
+
+                // 切換為通用穩定版模型，避免預覽版權限問題
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
                 let promptText = `你是一位專業的淨零碳盤查與管理專家。請依據 ISO 14064 系列、ISO 14067、GHG Protocol、IPCC 等國際標準，精準解答以下單選題。請務必做重複確認，不要給出錯誤的訊息。\n請在 reasoning 中仔細推論，確認無誤後，再於 answer 欄位輸出一個英文字母。\n\n題目：${q.question}\n選項：\n`;
-                Object.entries(q.options).forEach(([k, v]) => {
-                    if (v) promptText += `${k}: ${v}\n`;
-                });
+                Object.entries(q.options).forEach(([k, v]) => { if (v) promptText += `${k}: ${v}\n`; });
 
                 if (q.answer) {
                     promptText += `\n此題標準答案為：${q.answer}。請詳細解釋為什麼 ${q.answer} 是對的，並說明其他選項的錯誤之處。並將正確答案 "${q.answer}" 填入 answer 欄位。`;
@@ -406,14 +423,7 @@
                     contents: [{ parts: [{ text: promptText }] }],
                     generationConfig: {
                         responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                reasoning: { type: "STRING" },
-                                answer: { type: "STRING", enum: ["A", "B", "C", "D"] }
-                            },
-                            required: ["reasoning", "answer"]
-                        }
+                        responseSchema: { type: "OBJECT", properties: { reasoning: { type: "STRING" }, answer: { type: "STRING", enum: ["A", "B", "C", "D"] } }, required: ["reasoning", "answer"] }
                     }
                 };
 
@@ -422,7 +432,7 @@
                 while (retries > 0) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) throw new Error('API Error');
+                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                         const data = await response.json();
                         const resultJson = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
                         if (resultJson.answer && ["A", "B", "C", "D"].includes(resultJson.answer) && resultJson.reasoning) {
@@ -431,14 +441,13 @@
                         throw new Error('Invalid JSON structure');
                     } catch (e) {
                         retries--;
-                        if (retries === 0) return { answer: q.answer || 'A', reasoning: 'AI 暫時無法提供解析，請稍後重試。' }; 
+                        if (retries === 0) return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析 (錯誤原因: ${e.message})，請稍後重試。` }; 
                         await new Promise(res => setTimeout(res, delay));
                         delay *= 2;
                     }
                 }
             };
 
-            // 取得或背景抓取題目資料的統一介面
             const getOrFetchQuestionData = async (q) => {
                 if (q.explanation && q.answer) return { answer: q.answer, reasoning: q.explanation };
                 if (fetchingPromises.current[q.id]) return await fetchingPromises.current[q.id];
@@ -453,11 +462,9 @@
                 }
             };
 
-            // 背景自動預載 (Sliding Window Prefetch)：不管有無答案都預先取得「解析」
             useEffect(() => {
                 if (view !== 'quiz' || activeQuestions.length === 0) return;
-
-                const prefetchCount = 2; // 背景預載目前與下一題
+                const prefetchCount = 2;
                 const endIndex = Math.min(currentIndex + prefetchCount, activeQuestions.length);
 
                 for (let i = currentIndex; i < endIndex; i++) {
@@ -466,7 +473,7 @@
                         getOrFetchQuestionData(q).then(res => {
                             const updatedQ = { ...q, answer: res.answer, explanation: res.reasoning };
                             setActiveQuestions(prev => prev.map(x => x.id === q.id ? updatedQ : x));
-                            saveQuestionUpdate(updatedQ); // 同步至本地或雲端
+                            saveQuestionUpdate(updatedQ);
                         }).catch(e => console.error(e));
                     }
                 }
@@ -479,10 +486,7 @@
                     return;
                 }
                 filtered = [...filtered].sort(() => Math.random() - 0.5);
-                
-                if (questionCount !== 9999) {
-                    filtered = filtered.slice(0, questionCount);
-                }
+                if (questionCount !== 9999) filtered = filtered.slice(0, questionCount);
 
                 setActiveQuestions(filtered);
                 setCurrentSubject(subject);
@@ -505,7 +509,6 @@
                 let finalAnswer = activeQuestions[currentIndex].answer;
                 let finalExplanation = activeQuestions[currentIndex].explanation;
                 
-                // 若背景預載還沒完成，則在此處等待
                 if (!finalAnswer || !finalExplanation) {
                     setIsDeterminingAnswer(true);
                     const res = await getOrFetchQuestionData(activeQuestions[currentIndex]);
@@ -518,19 +521,14 @@
                     setIsDeterminingAnswer(false);
                 }
                 
-                if (finalAnswer === optionKey) {
-                    setScore(s => s + 1);
-                }
-                
+                if (finalAnswer === optionKey) setScore(s => s + 1);
                 setShowAnswer(true);
             };
 
             const nextQuestion = () => {
                 const currentQ = activeQuestions[currentIndex];
                 setQuizHistory(prev => [...prev, {
-                    ...currentQ,
-                    userSelected: selectedOption,
-                    isCorrect: currentQ.answer ? selectedOption === currentQ.answer : false
+                    ...currentQ, userSelected: selectedOption, isCorrect: currentQ.answer ? selectedOption === currentQ.answer : false
                 }]);
 
                 if (currentIndex + 1 < activeQuestions.length) {
@@ -542,7 +540,6 @@
                 }
             };
 
-            // 強制糾正 AI 解析與答案 (拒絕迎合錯誤觀念)
             const submitCorrection = async (qTarget) => {
                 const userNote = correctionInput[qTarget.id];
                 if (!userNote?.trim()) return;
@@ -550,28 +547,20 @@
                 setIsCorrectingSubmit(prev => ({ ...prev, [qTarget.id]: true }));
 
                 let promptText = `這是一道關於「${qTarget.subject}」的單選題。\n題目：${qTarget.question}\n選項：\n`;
-                Object.entries(qTarget.options).forEach(([k, v]) => {
-                    if (v) promptText += `${k}: ${v}\n`;
-                });
-                
+                Object.entries(qTarget.options).forEach(([k, v]) => { if (v) promptText += `${k}: ${v}\n`; });
                 promptText += `\n你先前的解析是：\n${qTarget.explanation}\n\n使用者提出了糾正或疑問：「${userNote}」\n請重新檢視這道題目。重要準則：請務必做重複確認，如果使用者的觀念是錯的，請以正確的 ISO/GHG 標準與答案糾正他，絕對不可以為了順著使用者的想法而改變成錯誤的答案。若你先前真的答錯了，才承認錯誤並給出正確解析與解答。`;
 
                 const apiKey = window.__gemini_api_key;
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-                
+                if(!apiKey || apiKey.includes("您的_")) {
+                    alert("請先設定有效的 API 金鑰。");
+                    setIsCorrectingSubmit(prev => ({ ...prev, [qTarget.id]: false }));
+                    return;
+                }
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 const payload = {
                     contents: [{ parts: [{ text: promptText }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                reasoning: { type: "STRING" },
-                                answer: { type: "STRING", enum: ["A", "B", "C", "D"] }
-                            },
-                            required: ["reasoning", "answer"]
-                        }
-                    }
+                    generationConfig: { responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { reasoning: { type: "STRING" }, answer: { type: "STRING", enum: ["A", "B", "C", "D"] } }, required: ["reasoning", "answer"] } }
                 };
 
                 let retries = 3;
@@ -582,7 +571,7 @@
                 while (retries > 0) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) throw new Error(`HTTP error!`);
+                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                         const data = await response.json();
                         const resultJson = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
                         if (resultJson.reasoning && resultJson.answer) {
@@ -592,7 +581,10 @@
                         }
                     } catch (error) {
                         retries--;
-                        if (retries === 0) break;
+                        if (retries === 0) {
+                            newExplanation = `AI 暫時無法處理您的糾正 (錯誤原因: ${error.message})，請稍後再試。`;
+                            break;
+                        }
                         await new Promise(res => setTimeout(res, delay));
                         delay *= 2;
                     }
@@ -615,9 +607,7 @@
                 const updatedQ = { ...targetQ, answer: newAnswer };
                 setActiveQuestions(prev => prev.map(q => q.id === questionId ? updatedQ : q));
                 setQuizHistory(prev => prev.map(q => {
-                    if (q.id === questionId) {
-                        return { ...updatedQ, isCorrect: q.userSelected === newAnswer };
-                    }
+                    if (q.id === questionId) return { ...updatedQ, isCorrect: q.userSelected === newAnswer };
                     return q;
                 }));
                 saveQuestionUpdate(updatedQ);
@@ -649,7 +639,7 @@
             ${importText}`;
 
                 const apiKey = window.__gemini_api_key;
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 
                 const payload = {
                     contents: [{ parts: [{ text: promptText }] }],
@@ -666,21 +656,34 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                         const data = await response.json();
                         const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
                         
                         if (resultText) {
                             try {
                                 const parsedData = JSON.parse(resultText);
-                                const newQs = parsedData.map(q => ({
-                                    ...q,
-                                    id: `cloud_${Date.now()}_${Math.random().toString(36).substring(2)}`
-                                }));
                                 
-                                // AI 修復後只放進預覽，讓使用者點擊「確認同步至雲端」才儲存
-                                setParsedPreview(newQs);
-                                setImportMessage({ text: `✨ AI 成功修復 ${newQs.length} 題！請點擊下方綠色按鈕確認同步至雲端。`, type: 'success' });
+                                const existingQuestions = new Set(allQuestions.map(q => q.question.trim()));
+                                const uniqueNewQs = [];
+                                let dupeCount = 0;
+
+                                parsedData.forEach(q => {
+                                    const qText = q.question.trim();
+                                    if (existingQuestions.has(qText)) {
+                                        dupeCount++;
+                                    } else {
+                                        uniqueNewQs.push({
+                                            ...q,
+                                            id: `cloud_${Date.now()}_${Math.random().toString(36).substring(2)}`
+                                        });
+                                        existingQuestions.add(qText);
+                                    }
+                                });
+                                
+                                setParsedPreview(uniqueNewQs);
+                                setDuplicateCount(dupeCount);
+                                setImportMessage({ text: `✨ AI 成功修復排版！過濾掉 ${dupeCount} 題重複題目，剩餘 ${uniqueNewQs.length} 題新題目可同步。`, type: 'success' });
                                 setImportText('');
                                 break; 
                             } catch (parseError) {
@@ -691,7 +694,7 @@
                     } catch (error) {
                         retries--;
                         if (retries === 0) {
-                            setImportMessage({ text: 'AI 服務連線失敗，請稍後再試。', type: 'error' });
+                            setImportMessage({ text: `AI 服務連線失敗 (錯誤: ${error.message})，請稍後再試。`, type: 'error' });
                         } else {
                             await new Promise(res => setTimeout(res, delay));
                             delay *= 2;
@@ -710,23 +713,24 @@
                     <div className="max-w-4xl mx-auto flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Icon name="book-open" />
-                        <h1 className="text-xl font-bold truncate">淨零碳考題刷題平台</h1>
+                        <h1 className="text-xl font-bold truncate">淨零碳刷題平台</h1>
                     </div>
                     <div className="flex items-center gap-4 text-sm font-medium">
-                        {user ? (
-                        <span className="hidden sm:flex items-center gap-1 text-emerald-200" title="您的題庫與進度已即時同步至雲端">
-                            <Icon name="cloud" size={16} /> 雲端同步中
+                        {connectionStatus === 'online' ? (
+                        <span className="hidden sm:flex items-center gap-1 text-emerald-200" title="已連線至雲端">
+                            <Icon name="cloud" size={16} /> 雲端模式
+                        </span>
+                        ) : connectionStatus === 'offline' ? (
+                        <span className="hidden sm:flex items-center gap-1 text-amber-200" title="資料安全儲存於本機">
+                            <Icon name="cloud-off" size={16} /> 本機離線模式
                         </span>
                         ) : (
                         <span className="hidden sm:flex items-center gap-1 text-emerald-300 opacity-70">
-                            <Icon name="cloud-off" size={16} /> 連線中...
+                            <Icon name="loader-2" className="animate-spin" size={16} /> 連線中...
                         </span>
                         )}
                         {view !== 'home' && (
-                        <button 
-                            onClick={() => setView('home')}
-                            className="flex items-center gap-1 hover:text-emerald-200 transition bg-emerald-800/50 px-3 py-1.5 rounded-lg"
-                        >
+                        <button onClick={() => setView('home')} className="flex items-center gap-1 hover:text-emerald-200 transition bg-emerald-800/50 px-3 py-1.5 rounded-lg">
                             <Icon name="home" size={16} /> <span>回首頁</span>
                         </button>
                         )}
@@ -739,63 +743,60 @@
                     <div className="space-y-6">
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center">
                         <h2 className="text-2xl font-bold text-emerald-800 mb-2">準備好開始測驗了嗎？</h2>
-                        <p className="text-slate-600 mb-6">請在下方選擇科目。您在電腦上匯入的題目，現在只要用手機開啟此網頁即可直接刷題！</p>
+                        <p className="text-slate-600 mb-6">請選擇下方科目。您可以隨時匯入題庫，資料會自動保存在您的設備中。</p>
                         
+                        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <div className="text-sm text-blue-800 text-left">
+                                <strong>💡 防火牆被擋？用這個最快：</strong><br/>
+                                請在電腦點擊「匯出備份」，傳到手機後，用手機網頁點選「匯入備份」即可完美還原所有題目與解析！
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                                <button onClick={handleExportFile} className="flex items-center justify-center gap-1 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded shadow transition">
+                                    <Icon name="download" size={16} /> 匯出備份
+                                </button>
+                                <button onClick={() => fileInputRef.current.click()} className="flex items-center justify-center gap-1 text-sm bg-white border border-blue-300 hover:bg-blue-100 text-blue-700 px-3 py-2 rounded shadow transition">
+                                    <Icon name="upload" size={16} /> 匯入備份
+                                </button>
+                                <input type="file" ref={fileInputRef} onChange={handleImportFile} accept=".json" className="hidden" />
+                            </div>
+                        </div>
+
                         <div className="mb-6 flex flex-col sm:flex-row items-center justify-center gap-3 p-4 bg-slate-50 rounded-lg border border-slate-100">
                             <label className="font-bold text-slate-700">每次測驗的題數：</label>
-                            <select 
-                            value={questionCount}
-                            onChange={(e) => setQuestionCount(Number(e.target.value))}
-                            className="border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-medium text-slate-700 bg-white"
-                            >
-                            <option value={10}>10 題</option>
-                            <option value={20}>20 題</option>
-                            <option value={50}>50 題</option>
-                            <option value={100}>100 題</option>
-                            <option value={9999}>全部題目</option>
+                            <select value={questionCount} onChange={(e) => setQuestionCount(Number(e.target.value))} className="border border-slate-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-medium text-slate-700 bg-white">
+                                <option value={10}>10 題</option>
+                                <option value={20}>20 題</option>
+                                <option value={50}>50 題</option>
+                                <option value={100}>100 題</option>
+                                <option value={9999}>全部題目</option>
                             </select>
                         </div>
 
                         <div className="grid md:grid-cols-2 gap-4">
                             <div className="bg-emerald-50 border border-emerald-100 p-5 rounded-lg text-left hover:shadow-md transition">
                             <h3 className="font-bold text-lg mb-1">考科一：淨零碳規劃管理基礎概論</h3>
-                            <p className="text-sm text-slate-500 mb-4">目前題數：{count1} 題 {isCloudLoading && '(雲端載入中...)'}</p>
-                            <button 
-                                onClick={() => startQuiz('考科一：淨零碳規劃管理基礎概論')}
-                                disabled={isCloudLoading}
-                                className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-medium transition disabled:opacity-50"
-                            >
+                            <p className="text-sm text-slate-500 mb-4">目前題數：{allQuestions.filter(q => q.subject === '考科一：淨零碳規劃管理基礎概論').length} 題</p>
+                            <button onClick={() => startQuiz('考科一：淨零碳規劃管理基礎概論')} disabled={isCloudLoading && connectionStatus === 'connecting'} className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-medium transition disabled:opacity-50">
                                 <Icon name="play" size={18} /> 開始測驗
                             </button>
                             </div>
 
                             <div className="bg-blue-50 border border-blue-100 p-5 rounded-lg text-left hover:shadow-md transition">
                             <h3 className="font-bold text-lg mb-1">考科二：淨零碳盤查規範與程序概要</h3>
-                            <p className="text-sm text-slate-500 mb-4">目前題數：{count2} 題 {isCloudLoading && '(雲端載入中...)'}</p>
-                            <button 
-                                onClick={() => startQuiz('考科二：淨零碳盤查規範與程序概要')}
-                                disabled={isCloudLoading}
-                                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition disabled:opacity-50"
-                            >
+                            <p className="text-sm text-slate-500 mb-4">目前題數：{allQuestions.filter(q => q.subject === '考科二：淨零碳盤查規範與程序概要').length} 題</p>
+                            <button onClick={() => startQuiz('考科二：淨零碳盤查規範與程序概要')} disabled={isCloudLoading && connectionStatus === 'connecting'} className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition disabled:opacity-50">
                                 <Icon name="play" size={18} /> 開始測驗
                             </button>
                             </div>
                         </div>
 
                         <div className="mt-4 grid md:grid-cols-2 gap-4">
-                            <button 
-                                onClick={() => startQuiz('ALL')}
-                                disabled={isCloudLoading}
-                                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-lg font-medium transition disabled:opacity-50"
-                            >
+                            <button onClick={() => startQuiz('ALL')} disabled={isCloudLoading && connectionStatus === 'connecting'} className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-lg font-medium transition disabled:opacity-50">
                                 <Icon name="file-text" size={18} /> 綜合模擬測驗 (共 {allQuestions.length} 題)
                             </button>
 
-                            <button 
-                                onClick={() => { setView('import'); setImportMessage({text:'', type:''}); }}
-                                className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-emerald-500 text-emerald-700 hover:bg-emerald-50 py-3 rounded-lg font-medium transition"
-                            >
-                                <Icon name="upload" size={18} /> 匯入與雲端同步
+                            <button onClick={() => { setView('import'); setImportMessage({text:'', type:''}); setDuplicateCount(0); }} className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-emerald-500 text-emerald-700 hover:bg-emerald-50 py-3 rounded-lg font-medium transition">
+                                <Icon name="plus-circle" size={18} /> 新增/貼上大量題庫
                             </button>
                         </div>
                         </div>
@@ -825,10 +826,8 @@
                         <div className="space-y-3">
                             {Object.entries(activeQuestions[currentIndex].options).map(([key, text]) => {
                             if (!text) return null;
-                            
                             const isCorrectAnswer = key === activeQuestions[currentIndex].answer;
                             const isSelected = selectedOption === key;
-                            
                             let optionClass = "w-full text-left p-4 rounded-lg border-2 transition-all flex items-start gap-3 ";
                             
                             if (!showAnswer) {
@@ -836,24 +835,18 @@
                             } else {
                                 optionClass += "cursor-default ";
                                 if (isCorrectAnswer) {
-                                optionClass += "border-emerald-500 bg-emerald-50 text-emerald-900 font-medium";
+                                    optionClass += "border-emerald-500 bg-emerald-50 text-emerald-900 font-medium";
                                 } else if (isSelected && !isCorrectAnswer) {
-                                optionClass += "border-red-400 bg-red-50 text-red-900";
+                                    optionClass += "border-red-400 bg-red-50 text-red-900";
                                 } else {
-                                optionClass += "border-slate-100 opacity-50";
+                                    optionClass += "border-slate-100 opacity-50";
                                 }
                             }
 
                             return (
-                                <button 
-                                key={key}
-                                onClick={() => handleOptionClick(key)}
-                                disabled={showAnswer || isDeterminingAnswer}
-                                className={optionClass}
-                                >
+                                <button key={key} onClick={() => handleOptionClick(key)} disabled={showAnswer || isDeterminingAnswer} className={optionClass}>
                                 <span className="font-bold min-w-[24px]">{key}.</span>
                                 <span className="flex-1">{text}</span>
-                                
                                 {showAnswer && isCorrectAnswer && <Icon name="check-circle" className="text-emerald-500 shrink-0" size={20} />}
                                 {showAnswer && isSelected && !isCorrectAnswer && <Icon name="x-circle" className="text-red-500 shrink-0" size={20} />}
                                 </button>
@@ -881,10 +874,7 @@
                                 
                                 {!isDeterminingAnswer && (
                                 <div className="flex gap-3 w-full md:w-auto">
-                                    <button 
-                                    onClick={nextQuestion}
-                                    className="flex-1 md:flex-none px-8 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-medium transition"
-                                    >
+                                    <button onClick={nextQuestion} className="flex-1 md:flex-none px-8 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-medium transition">
                                     {currentIndex + 1 === activeQuestions.length ? '查看結果' : '下一題'}
                                     </button>
                                 </div>
@@ -897,10 +887,7 @@
                                     <div className="flex items-center gap-1">
                                     <Icon name="sparkles" size={18} /> AI 老師即時解析：
                                     </div>
-                                    <button 
-                                    onClick={() => setIsCorrectingBoxOpen(prev => ({ ...prev, [activeQuestions[currentIndex].id]: !prev[activeQuestions[currentIndex].id] }))}
-                                    className="text-xs flex items-center gap-1 bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded transition"
-                                    >
+                                    <button onClick={() => setIsCorrectingBoxOpen(prev => ({ ...prev, [activeQuestions[currentIndex].id]: !prev[activeQuestions[currentIndex].id] }))} className="text-xs flex items-center gap-1 bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded transition">
                                     <Icon name="message-square" size={14} /> 覺得 AI 說錯了？
                                     </button>
                                 </div>
@@ -912,19 +899,9 @@
                                 {isCorrectingBoxOpen[activeQuestions[currentIndex].id] && (
                                     <div className="mt-4 pt-4 border-t border-purple-200 flex flex-col gap-2">
                                     <label className="font-bold text-purple-800 text-xs">請輸入您的糾正理由或疑問（AI 將嚴格查核您的觀念）：</label>
-                                    <textarea 
-                                        value={correctionInput[activeQuestions[currentIndex].id] || ''}
-                                        onChange={(e) => setCorrectionInput(prev => ({ ...prev, [activeQuestions[currentIndex].id]: e.target.value }))}
-                                        className="w-full border border-purple-300 rounded p-2 text-sm outline-none focus:ring-2 focus:ring-purple-500 bg-white resize-none"
-                                        rows="3"
-                                        placeholder="例如：這題答案應為 B 吧？因為 ISO 14067 規定..."
-                                    ></textarea>
+                                    <textarea value={correctionInput[activeQuestions[currentIndex].id] || ''} onChange={(e) => setCorrectionInput(prev => ({ ...prev, [activeQuestions[currentIndex].id]: e.target.value }))} className="w-full border border-purple-300 rounded p-2 text-sm outline-none focus:ring-2 focus:ring-purple-500 bg-white resize-none" rows="3" placeholder="例如：這題答案應為 B 吧？因為..."></textarea>
                                     <div className="flex justify-end">
-                                        <button 
-                                        onClick={() => submitCorrection(activeQuestions[currentIndex])}
-                                        disabled={isCorrectingSubmit[activeQuestions[currentIndex].id] || !correctionInput[activeQuestions[currentIndex].id]?.trim()}
-                                        className="flex items-center gap-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
-                                        >
+                                        <button onClick={() => submitCorrection(activeQuestions[currentIndex])} disabled={isCorrectingSubmit[activeQuestions[currentIndex].id] || !correctionInput[activeQuestions[currentIndex].id]?.trim()} className="flex items-center gap-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50">
                                         {isCorrectingSubmit[activeQuestions[currentIndex].id] ? <Icon name="loader-2" className="animate-spin" size={16} /> : <Icon name="send" size={16} />}
                                         {isCorrectingSubmit[activeQuestions[currentIndex].id] ? 'AI 重新推論中...' : '送出糾正'}
                                         </button>
@@ -951,16 +928,10 @@
                         </div>
 
                         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                            <button 
-                            onClick={() => startQuiz(currentSubject)}
-                            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-medium transition"
-                            >
+                            <button onClick={() => startQuiz(currentSubject)} className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-medium transition">
                             <Icon name="rotate-ccw" size={18} /> 再測一次
                             </button>
-                            <button 
-                            onClick={() => setView('home')}
-                            className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-8 py-3 rounded-lg font-medium transition"
-                            >
+                            <button onClick={() => setView('home')} className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-8 py-3 rounded-lg font-medium transition">
                             <Icon name="home" size={18} /> 回首頁
                             </button>
                         </div>
@@ -989,11 +960,7 @@
                                         <span className="text-xs font-bold opacity-70">強制更正解答：</span>
                                         {['A', 'B', 'C', 'D'].map(opt => (
                                         q.options[opt] ? (
-                                            <button
-                                            key={opt}
-                                            onClick={() => updateMasterAnswer(q.id, opt)}
-                                            className={`text-xs px-2 py-1 rounded transition ${q.answer === opt ? 'bg-emerald-600 text-white' : 'bg-emerald-200 text-emerald-800 hover:bg-emerald-300'}`}
-                                            >
+                                            <button key={opt} onClick={() => updateMasterAnswer(q.id, opt)} className={`text-xs px-2 py-1 rounded transition ${q.answer === opt ? 'bg-emerald-600 text-white' : 'bg-emerald-200 text-emerald-800 hover:bg-emerald-300'}`}>
                                             {opt}
                                             </button>
                                         ) : null
@@ -1008,10 +975,7 @@
                                         <div className="flex items-center gap-1">
                                         <Icon name="sparkles" size={16} /> AI 老師重點解析：
                                         </div>
-                                        <button 
-                                        onClick={() => setIsCorrectingBoxOpen(prev => ({ ...prev, [q.id]: !prev[q.id] }))}
-                                        className="text-xs flex items-center gap-1 bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded transition"
-                                        >
+                                        <button onClick={() => setIsCorrectingBoxOpen(prev => ({ ...prev, [q.id]: !prev[q.id] }))} className="text-xs flex items-center gap-1 bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded transition">
                                         <Icon name="message-square" size={14} /> 覺得 AI 說錯了？
                                         </button>
                                     </div>
@@ -1020,19 +984,9 @@
                                     {isCorrectingBoxOpen[q.id] && (
                                         <div className="mt-4 pt-4 border-t border-purple-200 flex flex-col gap-2">
                                         <label className="font-bold text-purple-800 text-xs">請輸入您的糾正理由或疑問（AI 將嚴格查核您的觀念）：</label>
-                                        <textarea 
-                                            value={correctionInput[q.id] || ''}
-                                            onChange={(e) => setCorrectionInput(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                            className="w-full border border-purple-300 rounded p-2 text-sm outline-none focus:ring-2 focus:ring-purple-500 bg-white resize-none"
-                                            rows="3"
-                                            placeholder="例如：這題答案應為 B 吧？因為 ISO 14067 規定..."
-                                        ></textarea>
+                                        <textarea value={correctionInput[q.id] || ''} onChange={(e) => setCorrectionInput(prev => ({ ...prev, [q.id]: e.target.value }))} className="w-full border border-purple-300 rounded p-2 text-sm outline-none focus:ring-2 focus:ring-purple-500 bg-white resize-none" rows="3" placeholder="例如：這題答案應為 B 吧？因為..."></textarea>
                                         <div className="flex justify-end">
-                                            <button 
-                                            onClick={() => submitCorrection(q)}
-                                            disabled={isCorrectingSubmit[q.id] || !correctionInput[q.id]?.trim()}
-                                            className="flex items-center gap-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
-                                            >
+                                            <button onClick={() => submitCorrection(q)} disabled={isCorrectingSubmit[q.id] || !correctionInput[q.id]?.trim()} className="flex items-center gap-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50">
                                             {isCorrectingSubmit[q.id] ? <Icon name="loader-2" className="animate-spin" size={16} /> : <Icon name="send" size={16} />}
                                             {isCorrectingSubmit[q.id] ? 'AI 重新推論中...' : '送出糾正'}
                                             </button>
@@ -1053,23 +1007,18 @@
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
-                            <Icon name="cloud" className="text-emerald-600" />
-                            <h2 className="text-xl font-bold">雲端同步匯入</h2>
+                            <Icon name="plus-circle" className="text-emerald-600" />
+                            <h2 className="text-xl font-bold">匯入與解析題庫</h2>
                         </div>
                         </div>
                         
                         <p className="text-sm text-slate-600 mb-6 bg-blue-50 p-4 rounded-lg border border-blue-100 leading-relaxed">
-                        <strong>💡 跨裝置刷題秘訣：</strong><br />
-                        請直接在您的<strong className="text-emerald-700">電腦</strong>上將 Word 檔案內容貼至下方並完成匯入。系統會自動將題庫備份至雲端，接著您只要用<strong className="text-emerald-700">手機</strong>開啟此網頁，題庫就會自動下載，隨時隨地都能刷題！
+                        <strong>💡 防呆防卡頓機制：</strong> 為了防止貼上幾千題導致瀏覽器當掉，系統會在您<strong>停止打字或貼上後 0.5 秒</strong>，才開始於右側產出預覽。
                         </p>
 
                         <div className="mb-4">
                         <label className="block text-sm font-medium text-slate-700 mb-1">匯入至目標科目：</label>
-                        <select 
-                            className="w-full md:w-1/2 border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none bg-slate-50"
-                            value={importSubject}
-                            onChange={(e) => setImportSubject(e.target.value)}
-                        >
+                        <select className="w-full md:w-1/2 border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none bg-slate-50" value={importSubject} onChange={(e) => setImportSubject(e.target.value)}>
                             <option value="考科一：淨零碳規劃管理基礎概論">考科一：淨零碳規劃管理基礎概論</option>
                             <option value="考科二：淨零碳盤查規範與程序概要">考科二：淨零碳盤查規範與程序概要</option>
                         </select>
@@ -1079,31 +1028,25 @@
                         <div className="flex-1 flex flex-col">
                             <div className="flex justify-between items-center mb-2">
                             <label className="text-sm font-bold text-slate-700">1. 貼上原始文字</label>
-                            <button 
-                                onClick={() => setImportText('')}
-                                className="text-xs text-slate-500 hover:text-red-500 transition"
-                            >
-                                清空內容
-                            </button>
+                            <button onClick={() => {setImportText(''); setDebouncedImportText(''); setDuplicateCount(0);}} className="text-xs text-slate-500 hover:text-red-500 transition">清空內容</button>
                             </div>
-                            <textarea 
-                            className="w-full flex-1 min-h-[400px] border border-slate-300 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
-                            placeholder="請貼上題目文字，格式亂掉也沒關係..."
-                            value={importText}
-                            onChange={(e) => setImportText(e.target.value)}
-                            ></textarea>
+                            <textarea className="w-full flex-1 min-h-[400px] border border-slate-300 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-emerald-500 outline-none resize-none" placeholder="請貼上題目文字，格式亂掉也沒關係..." value={importText} onChange={(e) => setImportText(e.target.value)}></textarea>
                         </div>
 
                         <div className="flex-1 flex flex-col bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
                             <div className="bg-slate-200 p-3 flex justify-between items-center border-b border-slate-300">
-                            <label className="text-sm font-bold text-slate-800">
-                                2. 即時解析預覽 <span className="text-emerald-600 font-black">({parsedPreview.length} 題)</span>
-                            </label>
+                            <div className="flex flex-col">
+                                <label className="text-sm font-bold text-slate-800">
+                                    2. 即時解析預覽 <span className="text-emerald-600 font-black">({parsedPreview.length} 題新題目)</span>
+                                </label>
+                                {duplicateCount > 0 && (
+                                    <span className="text-xs font-bold text-amber-600 mt-1">
+                                        ⚠️ 已為您自動過濾掉 {duplicateCount} 題重複題目
+                                    </span>
+                                )}
+                            </div>
                             {parsedPreview.length > 0 && (
-                                <button 
-                                onClick={() => setShowCleanText(!showCleanText)}
-                                className="text-xs bg-white px-2 py-1 rounded shadow-sm hover:bg-slate-100 transition font-medium text-slate-700"
-                                >
+                                <button onClick={() => setShowCleanText(!showCleanText)} className="text-xs bg-white px-2 py-1 rounded shadow-sm hover:bg-slate-100 transition font-medium text-slate-700">
                                 {showCleanText ? '切換為卡片預覽' : '檢視標準化純文字'}
                                 </button>
                             )}
@@ -1113,14 +1056,10 @@
                             {parsedPreview.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                 <Icon name="file-text" size={48} className="mb-2 opacity-50" />
-                                <p>貼上文字後，此處將自動產生整齊的題目</p>
+                                <p>貼上文字後停頓一下，此處將產生題目</p>
                                 </div>
                             ) : showCleanText ? (
-                                <textarea 
-                                readOnly 
-                                className="w-full h-full bg-white border border-slate-200 rounded p-3 font-mono text-sm text-slate-600 outline-none resize-none"
-                                value={getCleanText()}
-                                />
+                                <textarea readOnly className="w-full h-full bg-white border border-slate-200 rounded p-3 font-mono text-sm text-slate-600 outline-none resize-none" value={getCleanText()} />
                             ) : (
                                 <div className="space-y-4">
                                 {parsedPreview.map((q, idx) => (
@@ -1133,9 +1072,7 @@
                                         <div>D: {q.options.D || <span className="text-red-400">缺</span>}</div>
                                     </div>
                                     <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                                        <span className="font-medium text-emerald-700">
-                                        解答: {q.answer || <span className="text-amber-500">無 (測驗時可呼叫 AI 求解)</span>}
-                                        </span>
+                                        <span className="font-medium text-emerald-700">解答: {q.answer || <span className="text-amber-500">無 (測驗時可呼叫 AI 求解)</span>}</span>
                                     </div>
                                     </div>
                                 ))}
@@ -1152,21 +1089,12 @@
                         )}
 
                         <div className="mt-4 flex flex-col sm:flex-row gap-3">
-                        <button 
-                            onClick={confirmImport}
-                            disabled={parsedPreview.length === 0 || isImportingToCloud}
-                            className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg font-bold transition disabled:opacity-50 disabled:bg-slate-400"
-                        >
-                            {isImportingToCloud ? <Icon name="loader-2" className="animate-spin" size={20} /> : <Icon name="cloud" size={20} />}
-                            {isImportingToCloud ? '雲端同步中...' : `✓ 確認並將這 ${parsedPreview.length} 題同步至雲端`}
+                        <button onClick={confirmImport} disabled={parsedPreview.length === 0 || isImportingToCloud} className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg font-bold transition disabled:opacity-50 disabled:bg-slate-400">
+                            {isImportingToCloud ? <Icon name="loader-2" className="animate-spin" size={20} /> : <Icon name="plus-circle" size={20} />}
+                            {isImportingToCloud ? '寫入題庫中...' : `✓ 確認並將這 ${parsedPreview.length} 題加入題庫`}
                         </button>
                         
-                        <button 
-                            onClick={handleAiImport}
-                            disabled={isAiImporting || parsedPreview.length === 0 || isImportingToCloud}
-                            className="sm:w-auto px-6 flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-medium transition disabled:opacity-50"
-                            title="若本地解析結果仍有錯位，可嘗試使用 AI 修復 (需稍候)"
-                        >
+                        <button onClick={handleAiImport} disabled={isAiImporting || parsedPreview.length === 0 || isImportingToCloud} className="sm:w-auto px-6 flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-medium transition disabled:opacity-50" title="若本地解析結果仍有錯位，可嘗試使用 AI 修復 (需稍候)">
                             {isAiImporting ? <Icon name="loader-2" className="animate-spin" size={20} /> : <Icon name="sparkles" size={20} />}
                             <span>使用 AI 深度修復排版</span>
                         </button>
