@@ -122,7 +122,7 @@
             const [isAiImporting, setIsAiImporting] = useState(false);
             const [isImportingToCloud, setIsImportingToCloud] = useState(false);
             const [parsedPreview, setParsedPreview] = useState([]);
-            const [duplicateCount, setDuplicateCount] = useState(0); // 防重複計數器
+            const [duplicateCount, setDuplicateCount] = useState(0); 
             const [showCleanText, setShowCleanText] = useState(false);
 
             const fileInputRef = useRef(null);
@@ -144,7 +144,6 @@
                     try {
                         const importedData = JSON.parse(evt.target.result);
                         if (Array.isArray(importedData)) {
-                            // 匯入備份檔時也執行防重複比對
                             const existingQuestions = new Set(allQuestions.map(q => q.question.trim()));
                             const uniqueImported = [];
                             let dupeCount = 0;
@@ -176,13 +175,19 @@
                 reader.readAsText(file);
             };
 
-            // --- Firebase 連線驗證 ---
+            // --- Firebase 連線驗證 (加入強制 3 秒逾時防死當) ---
             useEffect(() => {
                 if (!window.__firebase_auth_funcs || !window.__firebase_auth) {
                     setConnectionStatus('offline');
                     setIsCloudLoading(false);
                     return;
                 }
+
+                const timeoutId = setTimeout(() => {
+                    setConnectionStatus('offline');
+                    setIsCloudLoading(false);
+                    console.warn("Firebase 連線逾時，強制切換至本機模式。");
+                }, 3000);
 
                 const initAuth = async () => {
                     const { signInAnonymously, signInWithCustomToken } = window.__firebase_auth_funcs;
@@ -192,8 +197,10 @@
                         } else {
                             await signInAnonymously(window.__firebase_auth);
                         }
+                        clearTimeout(timeoutId);
                         setConnectionStatus('online');
                     } catch (error) {
+                        clearTimeout(timeoutId);
                         setConnectionStatus('offline');
                         setIsCloudLoading(false);
                     }
@@ -208,7 +215,10 @@
                         setIsCloudLoading(false);
                     }
                 });
-                return () => unsubscribe();
+                return () => {
+                    clearTimeout(timeoutId);
+                    unsubscribe();
+                };
             }, []);
 
             useEffect(() => {
@@ -262,7 +272,6 @@
                 });
             };
 
-            // 防凍結：停止打字 0.5 秒後才解析
             useEffect(() => {
                 const timerId = setTimeout(() => {
                     setDebouncedImportText(importText);
@@ -270,7 +279,6 @@
                 return () => clearTimeout(timerId);
             }, [importText]);
 
-            // 自動防重複解析機制
             useEffect(() => {
                 if (!debouncedImportText.trim()) {
                     setParsedPreview([]);
@@ -329,7 +337,6 @@
                     tempParsed.push({...current, subject: importSubject, id: `local_${Date.now()}_${Math.random().toString(36).substring(2)}`});
                 }
 
-                // 進行防重複比對 (Deduplication)
                 const existingQuestions = new Set(allQuestions.map(q => q.question.trim()));
                 const uniqueParsed = [];
                 let dupeCount = 0;
@@ -340,7 +347,7 @@
                         dupeCount++;
                     } else {
                         uniqueParsed.push(q);
-                        existingQuestions.add(qClean); // 防止本次貼上的文字中自己重複
+                        existingQuestions.add(qClean);
                     }
                 });
 
@@ -348,7 +355,6 @@
                 setDuplicateCount(dupeCount);
             }, [debouncedImportText, importSubject, allQuestions]);
 
-            // Batch 批次寫入
             const confirmImport = async () => {
                 if (parsedPreview.length === 0) return;
                 setIsImportingToCloud(true);
@@ -401,13 +407,17 @@
                 }).join('\n');
             };
 
+            // --- 強制去除無效金鑰字元，並攔截真實錯誤訊息 ---
             const fetchQuestionData = async (q) => {
-                const apiKey = window.__gemini_api_key;
-                if(!apiKey || apiKey.includes("您的_")) {
+                const rawApiKey = window.__gemini_api_key || "";
+                // 嚴格淨化金鑰：只保留英文字母、數字、底線與連字號，徹底排除誤複製的空白或引號等符號
+                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
+                
+                if(!apiKey || rawApiKey.includes("您的_")) {
                     return { answer: q.answer || 'A', reasoning: '⚠️ 因未設定有效的 Gemini API 金鑰，系統無法提供 AI 推論與解析功能。' };
                 }
 
-                // 切換為通用穩定版模型，避免預覽版權限問題
+                // 使用最普遍支援且穩定的 1.5 Flash 版本
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
                 let promptText = `你是一位專業的淨零碳盤查與管理專家。請依據 ISO 14064 系列、ISO 14067、GHG Protocol、IPCC 等國際標準，精準解答以下單選題。請務必做重複確認，不要給出錯誤的訊息。\n請在 reasoning 中仔細推論，確認無誤後，再於 answer 欄位輸出一個英文字母。\n\n題目：${q.question}\n選項：\n`;
@@ -432,13 +442,20 @@
                 while (retries > 0) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                        
+                        // 攔截並解析 Google 伺服器的真實報錯訊息
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
+                            throw new Error(errorMessage);
+                        }
+                        
                         const data = await response.json();
                         const resultJson = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
                         if (resultJson.answer && ["A", "B", "C", "D"].includes(resultJson.answer) && resultJson.reasoning) {
                             return resultJson;
                         }
-                        throw new Error('Invalid JSON structure');
+                        throw new Error('回傳的 JSON 結構無效');
                     } catch (e) {
                         retries--;
                         if (retries === 0) return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析 (錯誤原因: ${e.message})，請稍後重試。` }; 
@@ -550,8 +567,10 @@
                 Object.entries(qTarget.options).forEach(([k, v]) => { if (v) promptText += `${k}: ${v}\n`; });
                 promptText += `\n你先前的解析是：\n${qTarget.explanation}\n\n使用者提出了糾正或疑問：「${userNote}」\n請重新檢視這道題目。重要準則：請務必做重複確認，如果使用者的觀念是錯的，請以正確的 ISO/GHG 標準與答案糾正他，絕對不可以為了順著使用者的想法而改變成錯誤的答案。若你先前真的答錯了，才承認錯誤並給出正確解析與解答。`;
 
-                const apiKey = window.__gemini_api_key;
-                if(!apiKey || apiKey.includes("您的_")) {
+                const rawApiKey = window.__gemini_api_key || "";
+                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
+                
+                if(!apiKey || rawApiKey.includes("您的_")) {
                     alert("請先設定有效的 API 金鑰。");
                     setIsCorrectingSubmit(prev => ({ ...prev, [qTarget.id]: false }));
                     return;
@@ -571,7 +590,13 @@
                 while (retries > 0) {
                     try {
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
+                            throw new Error(errorMessage);
+                        }
+                        
                         const data = await response.json();
                         const resultJson = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
                         if (resultJson.reasoning && resultJson.answer) {
@@ -638,7 +663,8 @@
             待整理文本：
             ${importText}`;
 
-                const apiKey = window.__gemini_api_key;
+                const rawApiKey = window.__gemini_api_key || "";
+                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 
                 const payload = {
@@ -656,7 +682,13 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                        
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({}));
+                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
+                            throw new Error(errorMessage);
+                        }
+                        
                         const data = await response.json();
                         const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
                         
