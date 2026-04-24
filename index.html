@@ -18,8 +18,8 @@
     <div id="root"></div>
 
     <script>
-        // 1. 設定 Gemini API Key (負責 AI 解題)
-        window.__gemini_api_key = "AIzaSyDIy2qw4CiEBJw2trwsKoELjlkvr8SLhQU"; 
+        // 1. 設定 Gemini API Key (現在可以從網頁右上角 UI 直接設定，不一定要改這裡)
+        window.__gemini_api_key = "您的_GEMINI_API_KEY"; 
         
         // 2. 設定 Firebase 雲端資料庫 (負責跨裝置同步)
         window.__firebase_config = {
@@ -32,7 +32,7 @@
         };
     </script>
 
-    <!-- 載入 Firebase SDK (加入 writeBatch 支援與安全防護) -->
+    <!-- 載入 Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
@@ -125,6 +125,10 @@
             const [duplicateCount, setDuplicateCount] = useState(0); 
             const [showCleanText, setShowCleanText] = useState(false);
 
+            // API 金鑰設定 Modal 狀態
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [tempApiKey, setTempApiKey] = useState(() => localStorage.getItem('netzero_gemini_api_key') || '');
+
             const fileInputRef = useRef(null);
 
             // --- 實體檔案匯出/匯入 ---
@@ -175,7 +179,7 @@
                 reader.readAsText(file);
             };
 
-            // --- Firebase 連線驗證 (加入強制 3 秒逾時防死當) ---
+            // --- Firebase 連線驗證 ---
             useEffect(() => {
                 if (!window.__firebase_auth_funcs || !window.__firebase_auth) {
                     setConnectionStatus('offline');
@@ -407,17 +411,20 @@
                 }).join('\n');
             };
 
-            // --- 強制去除無效金鑰字元，並攔截真實錯誤訊息 ---
+            // 取得 API Key 的安全函式：優先使用 UI 設定的，並去除所有前後空白
+            const getApiKey = () => {
+                const key = localStorage.getItem('netzero_gemini_api_key') || window.__gemini_api_key || "";
+                return key.trim();
+            };
+
+            // --- 強化錯誤攔截：如果失敗，直接印出伺服器真實的錯誤訊息 ---
             const fetchQuestionData = async (q) => {
-                const rawApiKey = window.__gemini_api_key || "";
-                // 嚴格淨化金鑰：只保留英文字母、數字、底線與連字號，徹底排除誤複製的空白或引號等符號
-                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
+                const apiKey = getApiKey();
                 
-                if(!apiKey || rawApiKey.includes("您的_")) {
-                    return { answer: q.answer || 'A', reasoning: '⚠️ 因未設定有效的 Gemini API 金鑰，系統無法提供 AI 推論與解析功能。' };
+                if(!apiKey || apiKey.includes("您的_")) {
+                    return { answer: q.answer || 'A', reasoning: '⚠️ 因未設定有效的 Gemini API 金鑰，系統無法提供 AI 推論與解析功能。請點擊右上角「設定金鑰」。' };
                 }
 
-                // 使用最普遍支援且穩定的 1.5 Flash 版本
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
                 let promptText = `你是一位專業的淨零碳盤查與管理專家。請依據 ISO 14064 系列、ISO 14067、GHG Protocol、IPCC 等國際標準，精準解答以下單選題。請務必做重複確認，不要給出錯誤的訊息。\n請在 reasoning 中仔細推論，確認無誤後，再於 answer 欄位輸出一個英文字母。\n\n題目：${q.question}\n選項：\n`;
@@ -445,9 +452,15 @@
                         
                         // 攔截並解析 Google 伺服器的真實報錯訊息
                         if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
-                            throw new Error(errorMessage);
+                            const errText = await response.text();
+                            let errMsg = `HTTP ${response.status}`;
+                            try {
+                                const errJson = JSON.parse(errText);
+                                errMsg = errJson.error?.message || errMsg;
+                            } catch(e) {
+                                errMsg = `${errMsg} - 伺服器回傳格式異常`;
+                            }
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -458,7 +471,7 @@
                         throw new Error('回傳的 JSON 結構無效');
                     } catch (e) {
                         retries--;
-                        if (retries === 0) return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析 (錯誤原因: ${e.message})，請稍後重試。` }; 
+                        if (retries === 0) return { answer: q.answer || 'A', reasoning: `AI 暫時無法提供解析，錯誤原因: ${e.message}` }; 
                         await new Promise(res => setTimeout(res, delay));
                         delay *= 2;
                     }
@@ -567,10 +580,9 @@
                 Object.entries(qTarget.options).forEach(([k, v]) => { if (v) promptText += `${k}: ${v}\n`; });
                 promptText += `\n你先前的解析是：\n${qTarget.explanation}\n\n使用者提出了糾正或疑問：「${userNote}」\n請重新檢視這道題目。重要準則：請務必做重複確認，如果使用者的觀念是錯的，請以正確的 ISO/GHG 標準與答案糾正他，絕對不可以為了順著使用者的想法而改變成錯誤的答案。若你先前真的答錯了，才承認錯誤並給出正確解析與解答。`;
 
-                const rawApiKey = window.__gemini_api_key || "";
-                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
+                const apiKey = getApiKey();
                 
-                if(!apiKey || rawApiKey.includes("您的_")) {
+                if(!apiKey || apiKey.includes("您的_")) {
                     alert("請先設定有效的 API 金鑰。");
                     setIsCorrectingSubmit(prev => ({ ...prev, [qTarget.id]: false }));
                     return;
@@ -592,9 +604,15 @@
                         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                         
                         if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
-                            throw new Error(errorMessage);
+                            const errText = await response.text();
+                            let errMsg = `HTTP ${response.status}`;
+                            try {
+                                const errJson = JSON.parse(errText);
+                                errMsg = errJson.error?.message || errMsg;
+                            } catch(e) {
+                                errMsg = `${errMsg} - 伺服器回傳格式異常`;
+                            }
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -607,7 +625,7 @@
                     } catch (error) {
                         retries--;
                         if (retries === 0) {
-                            newExplanation = `AI 暫時無法處理您的糾正 (錯誤原因: ${error.message})，請稍後再試。`;
+                            newExplanation = `AI 暫時無法處理您的糾正 (錯誤原因: ${error.message})`;
                             break;
                         }
                         await new Promise(res => setTimeout(res, delay));
@@ -663,8 +681,13 @@
             待整理文本：
             ${importText}`;
 
-                const rawApiKey = window.__gemini_api_key || "";
-                const apiKey = rawApiKey.replace(/[^a-zA-Z0-9_-]/g, '');
+                const apiKey = getApiKey();
+                if(!apiKey || apiKey.includes("您的_")) {
+                    setImportMessage({ text: '請先在右上角「設定金鑰」綁定您的 API Key。', type: 'error' });
+                    setIsAiImporting(false);
+                    return;
+                }
+
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 
                 const payload = {
@@ -684,9 +707,15 @@
                         });
                         
                         if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            const errorMessage = errorData?.error?.message || `HTTP Error ${response.status}`;
-                            throw new Error(errorMessage);
+                            const errText = await response.text();
+                            let errMsg = `HTTP ${response.status}`;
+                            try {
+                                const errJson = JSON.parse(errText);
+                                errMsg = errJson.error?.message || errMsg;
+                            } catch(e) {
+                                errMsg = `${errMsg} - 伺服器回傳格式異常`;
+                            }
+                            throw new Error(errMsg);
                         }
                         
                         const data = await response.json();
@@ -761,6 +790,11 @@
                             <Icon name="loader-2" className="animate-spin" size={16} /> 連線中...
                         </span>
                         )}
+                        
+                        <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-1 hover:text-emerald-200 transition bg-emerald-800/50 px-3 py-1.5 rounded-lg">
+                            <Icon name="settings" size={16} /> <span className="hidden sm:inline">設定金鑰</span>
+                        </button>
+
                         {view !== 'home' && (
                         <button onClick={() => setView('home')} className="flex items-center gap-1 hover:text-emerald-200 transition bg-emerald-800/50 px-3 py-1.5 rounded-lg">
                             <Icon name="home" size={16} /> <span>回首頁</span>
@@ -769,6 +803,37 @@
                     </div>
                     </div>
                 </header>
+
+                {/* API 設定 Modal */}
+                {isSettingsOpen && (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl">
+                            <h2 className="text-xl font-bold mb-3 flex items-center gap-2 text-slate-800">
+                                <Icon name="key" size={24} className="text-emerald-600" />
+                                設定 Gemini API 金鑰
+                            </h2>
+                            <p className="text-sm text-slate-600 mb-5 leading-relaxed">
+                                請在此貼上您從 Google AI Studio 申請的免費金鑰。<br/>
+                                <span className="text-emerald-600 font-medium">💡 直接透過介面設定，可避免因修改 HTML 檔案不小心多加空白所導致的 404 錯誤！</span>
+                            </p>
+                            <input 
+                                type="text" 
+                                value={tempApiKey}
+                                onChange={(e) => setTempApiKey(e.target.value)}
+                                className="w-full border border-slate-300 p-3 rounded-lg mb-6 focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-sm"
+                                placeholder="請貼上 AIzaSy 開頭的金鑰..."
+                            />
+                            <div className="flex justify-end gap-3">
+                                <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition font-medium">取消</button>
+                                <button onClick={() => {
+                                    localStorage.setItem('netzero_gemini_api_key', tempApiKey.trim());
+                                    setIsSettingsOpen(false);
+                                    alert('金鑰已儲存！請重新進行測驗測試 AI 功能。');
+                                }} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-medium">儲存設定</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <main className="max-w-4xl mx-auto p-4 md:p-6">
                     {view === 'home' && (
